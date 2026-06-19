@@ -9,9 +9,12 @@ import SwiftUI
 
 struct AnywhereVoyagerView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(VoyagerStore.self) private var store
 
     @State private var showOnboarding = false
+    @State private var revealed = false
+    @State private var glow = false
 
     var body: some View {
         ZStack {
@@ -27,8 +30,13 @@ struct AnywhereVoyagerView: View {
                         .scaledToFit()
                         .frame(width: min(width * 0.7, 400), height: min(height * 0.4, 400))
                         .foregroundStyle(cloudGradient)
-                        .shadow(color: Color(hex: 0xF4C98E, alpha: 0.55), radius: 26)
-                        .shadow(color: Color(hex: 0xFCEDC6, alpha: 0.30), radius: 10)
+                        .shadow(color: Color(hex: 0xF4C98E, alpha: glow ? 0.70 : 0.50), radius: glow ? 32 : 24)
+                        .shadow(color: Color(hex: 0xFCEDC6, alpha: glow ? 0.42 : 0.28), radius: glow ? 14 : 10)
+                        .animation(.easeInOut(duration: 2.8).repeatForever(autoreverses: true), value: glow)
+                        .scaleEffect(revealed || reduceMotion ? 1 : 0.94)
+                        .opacity(revealed ? 1 : 0)
+                        .offset(y: revealed || reduceMotion ? 0 : 16)
+                        .animation(.easeOut(duration: 0.7), value: revealed)
                         .position(x: width * 0.5, y: height * 0.3)
                     
                     Text("Voyager")
@@ -36,6 +44,9 @@ struct AnywhereVoyagerView: View {
                         .tracking(2)
                         .foregroundStyle(goldGradient)
                         .shadow(color: Color(hex: 0xF0B85E, alpha: 0.45), radius: 9)
+                        .opacity(revealed ? 1 : 0)
+                        .offset(y: revealed || reduceMotion ? 0 : 16)
+                        .animation(.easeOut(duration: 0.7).delay(0.12), value: revealed)
                         .position(x: width * 0.5, y: height * 0.585)
                 }
             }
@@ -43,6 +54,8 @@ struct AnywhereVoyagerView: View {
             VStack {
                 HStack {
                     closeButton
+                        .opacity(revealed ? 1 : 0)
+                        .animation(.easeOut(duration: 0.6).delay(0.30), value: revealed)
                         .padding(.leading, 32)
                         .padding(.top, 20)
                     Spacer()
@@ -53,9 +66,16 @@ struct AnywhereVoyagerView: View {
             VStack {
                 Spacer()
                 subscribeButton
+                    .opacity(revealed ? 1 : 0)
+                    .offset(y: revealed || reduceMotion ? 0 : 20)
+                    .animation(.easeOut(duration: 0.7).delay(0.25), value: revealed)
                     .padding(.horizontal, 24)
                     .padding(.bottom, 20)
             }
+        }
+        .onAppear {
+            revealed = true
+            if !reduceMotion { glow = true }
         }
         .sheet(isPresented: $showOnboarding) {
             VoyagerOnboardingView()
@@ -101,7 +121,7 @@ struct AnywhereVoyagerView: View {
             dismiss()
         } label: {
             Image(systemName: "xmark")
-                .font(.system(size: 20, weight: .bold))
+                .font(.system(size: 20))
                 .foregroundStyle(.white.opacity(0.85))
         }
         .accessibilityLabel("Close")
@@ -109,6 +129,10 @@ struct AnywhereVoyagerView: View {
 }
 
 struct VoyagerBackground: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    
+    @State private var twinkle = false
+
     private let designWidth: CGFloat = 440
     private let designHeight: CGFloat = 956
  
@@ -145,11 +169,17 @@ struct VoyagerBackground: View {
                     Circle()
                         .fill(Color(hex: 0xFBF4DE, alpha: stars[i].o))
                         .frame(width: stars[i].r * 2 * scale, height: stars[i].r * 2 * scale)
+                        .opacity(twinkle ? 0.45 + 0.10 * Double(i % 3) : 1.0)
+                        .animation(.easeInOut(duration: 2.0 + 0.7 * Double(i % 4))
+                            .repeatForever(autoreverses: true)
+                            .delay(0.35 * Double(i)), value: twinkle)
                         .position(P(stars[i].x, stars[i].y))
                 }
                 Sparkle()
                     .fill(Color(hex: 0xFFF6DF, alpha: 0.85))
                     .frame(width: 16 * scale, height: 16 * scale)
+                    .scaleEffect(twinkle ? 1.12 : 1.0)
+                    .animation(.easeInOut(duration: 2.8).repeatForever(autoreverses: true), value: twinkle)
                     .position(P(210, 60))
  
                 // 5 — Route line to a destination waypoint
@@ -169,11 +199,15 @@ struct VoyagerBackground: View {
                     .fill(Color(hex: 0xFBC97A, alpha: 0.5))
                     .frame(width: 12 * scale, height: 12 * scale)
                     .blur(radius: 3.5 * scale)
+                    .scaleEffect(twinkle ? 1.22 : 1.0)
+                    .animation(.easeInOut(duration: 2.3).repeatForever(autoreverses: true).delay(0.4), value: twinkle)
                     .position(P(384, 132))
  
                 Sparkle()                                  // waypoint star
                     .fill(Color(hex: 0xFFF3D6))
                     .frame(width: 16 * scale, height: 16 * scale)
+                    .scaleEffect(twinkle ? 1.18 : 1.0)
+                    .animation(.easeInOut(duration: 2.3).repeatForever(autoreverses: true).delay(0.4), value: twinkle)
                     .position(P(384, 132))
  
                 // 6 — Edge vignette for depth
@@ -182,6 +216,7 @@ struct VoyagerBackground: View {
             .clipped()
         }
         .ignoresSafeArea()
+        .onAppear { if !reduceMotion { twinkle = true } }
     }
  
     // MARK: Star

@@ -196,16 +196,16 @@ struct VoyagerOnboardingView: View {
                 subtitle: "A single purchase, yours to keep."),
         Benefit(systemName: "person.2.fill",
                 title: "Family Sharing",
-                subtitle: "Share Voyager with family members."),
+                subtitle: "Share Voyager membership with family."),
         Benefit(systemName: "paintpalette.fill",
                 title: "Personalization",
                 subtitle: "Build custom themes and use alternate icons."),
         Benefit(systemName: "hammer.fill",
                 title: "Public Beta Access",
-                subtitle: "Join the TestFlight beta and try new features first."),
+                subtitle: "Join Public Beta and try new features first."),
         Benefit(systemName: "heart.fill",
                 title: "Support Open Source",
-                subtitle: "Help Anywhere community thrive.")
+                subtitle: "The road is long. Walk it with us.")
     ]
 
     private static let goldGradient = LinearGradient(
