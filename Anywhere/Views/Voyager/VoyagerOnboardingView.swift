@@ -61,8 +61,12 @@ struct VoyagerOnboardingView: View {
                 .foregroundStyle(Self.goldGradient)
                 .padding(.bottom, 2)
 
-            Text("Anywhere Voyager")
-                .font(.system(size: 28, weight: .bold, design: .serif))
+            HStack {
+                Text("Anywhere")
+                    .font(.system(size: 28, weight: .semibold))
+                Text("Voyager")
+                    .font(.system(size: 28, weight: .semibold, design: .serif))
+            }
         }
         .multilineTextAlignment(.center)
         .frame(maxWidth: .infinity)

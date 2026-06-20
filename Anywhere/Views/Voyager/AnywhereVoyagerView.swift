@@ -65,10 +65,11 @@ struct AnywhereVoyagerView: View {
             
             VStack {
                 Spacer()
-                subscribeButton
+                bottomAction
                     .opacity(revealed ? 1 : 0)
                     .offset(y: revealed || reduceMotion ? 0 : 20)
                     .animation(.easeOut(duration: 0.7).delay(0.25), value: revealed)
+                    .animation(.easeInOut(duration: 0.4), value: store.isMember)
                     .padding(.horizontal, 24)
                     .padding(.bottom, 20)
             }
@@ -102,6 +103,17 @@ struct AnywhereVoyagerView: View {
     }
 
     @ViewBuilder
+    private var bottomAction: some View {
+        if store.isMember {
+            memberBadge
+                .transition(.opacity)
+        } else {
+            subscribeButton
+                .transition(.opacity)
+        }
+    }
+
+    @ViewBuilder
     private var subscribeButton: some View {
         Button {
             showOnboarding = true
@@ -113,6 +125,15 @@ struct AnywhereVoyagerView: View {
                 .background(goldGradient, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .shadow(color: Color(hex: 0xF0B85E).opacity(0.35), radius: 14, y: 4)
         }
+    }
+
+    @ViewBuilder
+    private var memberBadge: some View {
+        Text("Member \(Image(systemName: "checkmark.seal.fill"))")
+            .textCase(.uppercase)
+            .font(.body.weight(.semibold))
+            .foregroundStyle(goldGradient)
+            .frame(maxWidth: .infinity, minHeight: 54)
     }
     
     @ViewBuilder
