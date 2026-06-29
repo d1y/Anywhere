@@ -110,8 +110,9 @@ final class MITMScriptEngine {
             self.completion = nil
         }
     }
-
-    private let context: JSContext
+    
+    private var context: JSContext
+    
     /// Compiled `process(ctx)` functions keyed by source hash; `byteCount` is a hash-collision guard.
     private struct CompiledEntry {
         let byteCount: Int
@@ -156,8 +157,13 @@ final class MITMScriptEngine {
 
     init() {
         self.context = JSContext(virtualMachine: Self.sharedVM)
+        configureContext()
+    }
+
+    /// Wires the exception handler and installs the `Anywhere` globals onto the current `context`.
+    private func configureContext() {
         // Reinstate JSC's default write to context.exception or downstream checks never fire.
-        self.context.exceptionHandler = { [weak self] context, exception in
+        context.exceptionHandler = { [weak self] context, exception in
             defer { context?.exception = exception }
             if let self, self.isFormattingException {
                 logger.warning("[MITM][JS] uncaught (nested throw while formatting exception)")
@@ -179,7 +185,7 @@ final class MITMScriptEngine {
     private func runUserScript<T>(_ label: String, _ body: () -> T) -> T {
         MITMScriptWatchdog.begin(label)
         defer { MITMScriptWatchdog.end() }
-        return PerformanceMonitor.measure(.mitmScript, body)
+        return body()
     }
 
     /// A script-set directive wins over a trailing uncaught throw; a bare throw reverts to the original.
@@ -412,6 +418,20 @@ final class MITMScriptEngine {
         for key in stale { compiled.removeValue(forKey: key) }
     }
 
+    /// Reload reset. Script-queue only.
+    fileprivate func resetOnReload(keepingCompiled keep: Set<Int>) {
+        invocationLock.lock()
+        defer { invocationLock.unlock() }
+        guard currentInvocation == nil, liveInvocations.isEmpty else {
+            let stale = compiled.keys.filter { !keep.contains($0) }
+            for key in stale { compiled.removeValue(forKey: key) }
+            return
+        }
+        compiled.removeAll()
+        context = JSContext(virtualMachine: Self.sharedVM)
+        configureContext()
+    }
+
     private func compileIfNeeded(_ source: String, key: Int) -> JSValue? {
         let byteCount = source.utf8.count
         if let cached = compiled[key] {
@@ -419,9 +439,7 @@ final class MITMScriptEngine {
             if cached.byteCount == byteCount { return cached.function }
             logger.warning("[MITM][JS] cache-key collision: recompiling under same key")
         }
-        // IIFE: keeps `process` out of globalThis; top-level user code runs here,
-        // so a `while(true)` outside `process` hangs at compile time — watchdog covers it.
-        let wrapped = "(function(){\n\(source)\nreturn process;\n})()"
+        let wrapped = "(function(){\n\"use strict\";\n\(source)\nreturn process;\n})()"
         let value = runUserScript(source) { context.evaluateScript(wrapped) }
         if context.exception != nil {
             context.exception = nil
@@ -579,6 +597,7 @@ final class MITMScriptEngine {
         installJWTGlobals(on: anywhere)
         installJSONGlobals(on: anywhere)
         installStoreGlobals(on: anywhere)
+        installParamsGlobals(on: anywhere)
         installLogGlobals(on: anywhere)
         installControlGlobals(on: anywhere)
         installHTTPGlobals(on: anywhere)
@@ -1344,6 +1363,30 @@ final class MITMScriptEngine {
         anywhere.setObject(store, forKeyedSubscript: "store" as NSString)
     }
 
+    /// Installs read-only `Anywhere.params` (no setter), scoped to the running rule set.
+    private func installParamsGlobals(on anywhere: JSValue) {
+        let params = JSValue(newObjectIn: context)!
+        let paramsGet: @convention(block) (String) -> JSValue = { [weak self] key in
+            let context = JSContext.current()!
+            guard let scope = self?.currentInvocation?.scope,
+                  let value = MITMParamStore.shared.get(scope: scope, key: key)
+            else { return JSValue(undefinedIn: context) }
+            return JSValue(object: value, in: context)
+        }
+        let paramsKeys: @convention(block) () -> [String] = { [weak self] in
+            guard let scope = self?.currentInvocation?.scope else { return [] }
+            return MITMParamStore.shared.keys(scope: scope)
+        }
+        let paramsAll: @convention(block) () -> [String: String] = { [weak self] in
+            guard let scope = self?.currentInvocation?.scope else { return [:] }
+            return MITMParamStore.shared.all(scope: scope)
+        }
+        params.setObject(paramsGet, forKeyedSubscript: "get" as NSString)
+        params.setObject(paramsKeys, forKeyedSubscript: "keys" as NSString)
+        params.setObject(paramsAll, forKeyedSubscript: "all" as NSString)
+        anywhere.setObject(params, forKeyedSubscript: "params" as NSString)
+    }
+
     private func installLogGlobals(on anywhere: JSValue) {
         let log = JSValue(newObjectIn: context)!
         let logInfo: @convention(block) (String) -> Void = { msg in
@@ -2091,11 +2134,28 @@ extension MITMScriptEngine {
             return engine
         }
     }
-
-    /// Drops engines for removed rule sets; state survives an edit (the id is stable) and clears only on removal.
+    
     static func purgeEngines(activeIDs: Set<UUID>) {
-        registryLock.withLock {
+        let dropped: [MITMScriptEngine] = registryLock.withLock {
+            let removed = engines.filter { !activeIDs.contains($0.key) }.map { $0.value }
             engines = engines.filter { activeIDs.contains($0.key) }
+            return removed
+        }
+        guard !dropped.isEmpty else { return }
+        // Hold the dropped engines until the queue drains them so their final release lands on the
+        // VM-owning queue.
+        MITMScriptTransform.scriptQueue.async { withExtendedLifetime(dropped) {} }
+    }
+
+    /// Reload reset for the engines that survive ``purgeEngines``.
+    static func resetCachesOnReload(keepByScope: [UUID: Set<Int>]) {
+        MITMScriptTransform.scriptQueue.async {
+            let snapshot: [(engine: MITMScriptEngine, keep: Set<Int>)] = registryLock.withLock {
+                engines.map { (engine: $0.value, keep: keepByScope[$0.key] ?? []) }
+            }
+            for item in snapshot {
+                item.engine.resetOnReload(keepingCompiled: item.keep)
+            }
         }
     }
 

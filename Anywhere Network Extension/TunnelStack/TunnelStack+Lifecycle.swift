@@ -26,7 +26,6 @@ extension TunnelStack {
             }
             self?.appendLog(message, level: logLevel)
         }
-        PerformanceMonitor.start()
         self.packetFlow = packetFlow
         self.configuration = configuration
 
@@ -37,7 +36,7 @@ extension TunnelStack {
             registerCallbacks()
             lwip_bridge_init()
             startTimeoutTimer()
-            startUDPCleanupTimer()
+            scheduleUDPCleanup()
             installFDPressureReliefHandler()
             startReadingPackets()
             logger.debug("[TunnelStack] Started, mode=\(proxyMode.rawValue), advertiseIPv6=\(advertiseIPv6ToApps), bypass=\(!bypassCountryCode.isEmpty)")
@@ -61,7 +60,6 @@ extension TunnelStack {
         }
 
         AnywhereLogger.logSink = nil
-        PerformanceMonitor.stop()
         packetFlow = nil
         configuration = nil
         TunnelStack.shared = nil
@@ -78,6 +76,7 @@ extension TunnelStack {
     /// Invalidates outbound proxy state after device wake: the kernel tears
     /// down our outbound sockets across sleep, but in-process lwIP state survives.
     func handleWake() {
+        scheduler.reconcile()
         lwipQueue.async { [self] in
             guard running, let configuration else { return }
             logger.info("[VPN] Device wake: invalidating outbound proxy state")
@@ -206,8 +205,7 @@ extension TunnelStack {
             timeoutTimer?.resume()
         }
         timeoutTimer = nil
-        udpCleanupTimer?.cancel()
-        udpCleanupTimer = nil
+        scheduler.cancelAll()
 
         outputBufferLock.withLock {
             outputPackets.removeAll(keepingCapacity: true)
@@ -276,7 +274,7 @@ extension TunnelStack {
         registerCallbacks()
         lwip_bridge_init()
         startTimeoutTimer()
-        startUDPCleanupTimer()
+        scheduleUDPCleanup()
         logger.debug("[TunnelStack] Restarted, mode=\(proxyMode.rawValue), advertiseIPv6=\(advertiseIPv6ToApps), bypass=\(!bypassCountryCode.isEmpty)")
     }
 

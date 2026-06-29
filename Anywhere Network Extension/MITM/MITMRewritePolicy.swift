@@ -147,8 +147,8 @@ struct CompiledMITMRuleSet {
 
 /// Domain-suffix matching is most-specific-wins via a trie of reversed labels.
 final class MITMRewritePolicy {
-
-    private var trie = FlatLabelTrie<CompiledMITMRuleSet>()
+    private var trie = FlatLabelTrie<Int16>()
+    private var compiledSets: [CompiledMITMRuleSet] = []
     private var setCount: Int = 0
 
     /// Guards trie + setCount; reload holds it across the full rebuild so lookups never see a half-built trie.
@@ -163,7 +163,8 @@ final class MITMRewritePolicy {
 
     /// Caller must hold `lock`.
     private func resetUnlocked() {
-        trie = FlatLabelTrie<CompiledMITMRuleSet>()
+        trie = FlatLabelTrie<Int16>()
+        compiledSets = []
         setCount = 0
     }
 
@@ -185,6 +186,8 @@ final class MITMRewritePolicy {
         // Purge JS engine state for deleted sets; edited sets (stable id) keep theirs.
         let activeIDs = Set(ruleSets.map { $0.id })
         MITMScriptEngine.purgeEngines(activeIDs: activeIDs)
+        // Surface each set's resolved parameters to scripts as Anywhere.params.
+        MITMParamStore.shared.replaceAll(ruleSets.map { (scope: $0.id, values: $0.parameterValues) })
         // Prewarm compile caches so the first intercepted flow doesn't pay cold-start inline.
         MITMScriptTransform.prewarm(scopedRules: scopedRules)
         let purged = MITMScriptStore.shared.purgeExcept(activeIDs: activeIDs)
@@ -212,12 +215,18 @@ final class MITMRewritePolicy {
         }
 
         for suffix in suffixes {
+            guard compiledSets.count < Int(Int16.max) else {
+                logger.warning("MITM suffix table full (\(compiledSets.count) entries)")
+                break
+            }
             let payload = CompiledMITMRuleSet(
                 id: set.id,
                 domainSuffix: suffix,
                 rules: compiledRules
             )
-            if trie.insert(suffix: suffix, payload: payload) {
+            let payloadID = Int16(compiledSets.count)
+            compiledSets.append(payload)
+            if trie.insert(suffix: suffix, payload: payloadID) {
                 setCount += 1
             } else {
                 // Later set (user-list order) wins; log so the override is never silent.
@@ -237,7 +246,10 @@ final class MITMRewritePolicy {
         var lowered = host.lowercased()
         return lock.withLock { () -> CompiledMITMRuleSet? in
             guard setCount > 0 else { return nil }
-            return lowered.withUTF8 { trie.lookup($0) }
+            guard let id = lowered.withUTF8({ trie.lookup($0) }) else { return nil }
+            let index = Int(id)
+            guard index >= 0, index < compiledSets.count else { return nil }
+            return compiledSets[index]
         }
     }
 
@@ -483,12 +495,18 @@ enum MITMBinaryReader {
         let bytes: UnsafeBufferPointer<UInt8>
         private var readOffset = 0
         private var count: Int { bytes.count }
+        /// Payload version; gates the v2 parameter section so a v1 blob still decodes.
+        private var version: UInt8 = 0
 
         init(bytes: UnsafeBufferPointer<UInt8>) { self.bytes = bytes }
 
         mutating func readSnapshot() throws -> (enabled: Bool, ruleSets: [MITMRuleSet]) {
             try expectMagic()
-            guard try u8() == MITMBinaryFormat.version else { throw ReadError.badVersion }
+            let payloadVersion = try u8()
+            guard payloadVersion >= 1, payloadVersion <= MITMBinaryFormat.version else {
+                throw ReadError.badVersion
+            }
+            version = payloadVersion
             let enabled = try u8() != 0
             let setCount = try u32()
             var sets: [MITMRuleSet] = []
@@ -517,8 +535,21 @@ enum MITMBinaryReader {
                 rules.append(try readRule())
                 remaining -= 1
             }
-            return MITMRuleSet(id: id, name: name, enabled: enabled,
-                               domainSuffixes: suffixes, rules: rules, subscriptionURL: nil)
+            // v2: resolved parameter values (name → value). Absent in v1 payloads.
+            var parameterValues: [String: String] = [:]
+            if version >= 2 {
+                let paramCount = try u16()
+                parameterValues.reserveCapacity(Int(paramCount))
+                for _ in 0..<paramCount {
+                    let key = try str16()
+                    let value = try str16()
+                    parameterValues[key] = value
+                }
+            }
+            var set = MITMRuleSet(id: id, name: name, enabled: enabled,
+                                  domainSuffixes: suffixes, rules: rules, subscriptionURL: nil)
+            set.parameterValues = parameterValues
+            return set
         }
 
         private mutating func readRule() throws -> MITMRule {
