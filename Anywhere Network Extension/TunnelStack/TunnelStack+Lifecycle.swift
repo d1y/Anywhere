@@ -37,7 +37,6 @@ extension TunnelStack {
             lwip_bridge_init()
             startTimeoutTimer()
             scheduleUDPCleanup()
-            installFDPressureReliefHandler()
             startReadingPackets()
             logger.debug("[TunnelStack] Started, mode=\(proxyMode.rawValue), advertiseIPv6=\(advertiseIPv6ToApps), bypass=\(!bypassCountryCode.isEmpty)")
         }
@@ -48,13 +47,10 @@ extension TunnelStack {
 
     func stop() {
         stopObservingSettings()
-        clearFDPressureReliefHandler()
         lwipQueue.sync { [self] in
             running = false
             deferredRestart?.cancel()
             deferredRestart = nil
-            pendingNetworkRecovery?.cancel()
-            pendingNetworkRecovery = nil
             shutdownInternal()
             fakeIPPool.reset()
         }
@@ -92,36 +88,20 @@ extension TunnelStack {
             guard running else { return }
             logger.info("[VPN] Path offline/sleep: releasing upstream transports; will rebuild when it returns")
 
-            TransportReclaim.reclaimAll()
+            reclaimAllOutboundPools()
             reclaimInstanceTransports(rebuildMultiplexerPool: false)
         }
     }
 
-    /// Recovers connections after a network path change (only outbound sockets
-    /// are stranded — no full restart). Debounced: leading edge fires
-    /// immediately; a burst coalesces into one trailing recovery.
-    func handleNetworkPathChange(summary: String) {
+    /// Rebuilds the instance upstream transports `suspendOutbound` released and flushes
+    /// stale DNS, once the path returns. Pooled and app-facing legs are left to their
+    /// viability handlers; pooled transports rebuild on the next dial.
+    func resumeOutbound() {
         lwipQueue.async { [self] in
             guard running, configuration != nil else { return }
-
-            let now = CFAbsoluteTimeGetCurrent()
-            let elapsed = now - lastNetworkRecoveryTime
-
-            if elapsed < TunnelConstants.networkRecoveryDebounceInterval {
-                pendingNetworkRecovery?.cancel()
-                let delay = TunnelConstants.networkRecoveryDebounceInterval - elapsed
-                let work = DispatchWorkItem { [self] in
-                    pendingNetworkRecovery = nil
-                    guard running else { return }
-                    performNetworkRecovery(summary: summary)
-                }
-                pendingNetworkRecovery = work
-                lwipQueue.asyncAfter(deadline: .now() + delay, execute: work)
-                logger.debug("[TunnelStack] Network recovery debounced, deferred by \(String(format: "%.0f", delay * 1000))ms")
-                return
-            }
-
-            performNetworkRecovery(summary: summary)
+            logger.info("[VPN] Path restored: flushing DNS and rebuilding upstream transports")
+            DNSResolver.shared.flush()
+            reclaimInstanceTransports(rebuildMultiplexerPool: true)
         }
     }
 
@@ -146,16 +126,6 @@ extension TunnelStack {
         }
     }
 
-    /// Runs the recovery and stamps the debounce clock. Must be called on `lwipQueue`.
-    private func performNetworkRecovery(summary: String) {
-        pendingNetworkRecovery?.cancel()
-        pendingNetworkRecovery = nil
-        lastNetworkRecoveryTime = CFAbsoluteTimeGetCurrent()
-        guard let configuration else { return }
-        logger.warning("[VPN] Recovering connections after \(summary)")
-        invalidateOutboundState(configuration: configuration)
-    }
-
     /// Flushes cached DNS and invalidates all outbound transport state while
     /// leaving the lwIP netif, listeners, and timers running. Must be called
     /// on `lwipQueue`.
@@ -171,8 +141,15 @@ extension TunnelStack {
             Unmanaged<TCPConnection>.fromOpaque(arg).takeUnretainedValue().close()
         }
 
-        TransportReclaim.reclaimAll()
+        reclaimAllOutboundPools()
         reclaimInstanceTransports(rebuildMultiplexerPool: true)
+    }
+
+    /// Reclaims process-wide outbound pools: `TransportReclaim` (Shared) plus the extension-only
+    /// script `fetch` HTTP/2 pool, which Shared can't see.
+    private func reclaimAllOutboundPools() {
+        TransportReclaim.reclaimAll()
+        MITMScriptHTTP2Pool.shared.reclaim()
     }
 
     /// Reclaims the udpQueue-owned per-tunnel transports (Vision mux, SS UDP
@@ -219,7 +196,7 @@ extension TunnelStack {
             outputDrainInFlight = false
         }
 
-        TransportReclaim.reclaimAll()
+        reclaimAllOutboundPools()
         reclaimInstanceTransports(rebuildMultiplexerPool: false)
 
         isTearingDown = true
@@ -385,6 +362,14 @@ extension TunnelStack {
                 logger.info("[VPN] Block WebRTC changed: \(self.blockWebRTC) -> \(blockWebRTC)")
                 self.blockWebRTC = blockWebRTC
                 publishUDPConfig()
+            }
+
+            // Prevent DNS Leak only affects the connection-time routing decision;
+            // the flag is self-synchronized, so update it in place.
+            let preventDNSLeak = AWCore.getPreventDNSLeak()
+            if preventDNSLeak != self.preventDNSLeak {
+                logger.info("[VPN] Prevent DNS Leak changed: \(self.preventDNSLeak) -> \(preventDNSLeak)")
+                self.preventDNSLeak = preventDNSLeak
             }
 
             // Reflection is a pure read-path setting; reload in place, before

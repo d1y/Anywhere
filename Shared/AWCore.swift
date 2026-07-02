@@ -25,15 +25,14 @@ nonisolated final class AWCore {
         static let quicQueue = "\(bundle).quic"
         static let udpQueue = "\(bundle).udp"
         
-        // MARK: Socket queue labels
-        static let rawTCPSocketQueue = "\(bundle).raw-tcp-socket"
-        static let rawUDPSocketQueue = "\(bundle).raw-udp-socket"
+        // MARK: Transport queue labels
+        static let nwTCPTransportQueue = "\(bundle).nw-tcp-transport"
+        static let nwUDPTransportQueue = "\(bundle).nw-udp-transport"
 
         // MARK: Protocol queue labels
         static let http11Queue = "\(bundle).http11"
         static let http2SessionQueue = "\(bundle).http2-session"
-        static let http3PoolCleanupQueue = "\(bundle).http3-pool-cleanup"
-        static let anyTLSIdleQueue = "\(bundle).anytls-idle-cleanup"
+        static let multiplexerEvictionQueue = "\(bundle).multiplexer-eviction"
         static let anyTLSSessionTimerQueue = "\(bundle).anytls-session-timer"
 
         static let sudokuTCPReadQueue = "\(bundle).sudoku.tcp.read"
@@ -86,13 +85,13 @@ nonisolated final class AWCore {
         static let blockWebRTC = "blockWebRTC"
         static let bypassCountryCode = "bypassCountryCode"
         static let experimentalEnabled = "experimentalEnabled"
-        static let hiddenSettingsItems = "hiddenSettingsItems"
         static let hideVPNIcon = "hideVPNIcon"
         static let homeColorScheme = "homeColorScheme"
         static let iCloudSyncEnabled = "iCloudSyncEnabled"
         static let identifier = "identifier"
         static let lastConfigurationData = "lastConfigurationData"
         static let onboardingCompleted = "onboardingCompleted"
+        static let preventDNSLeak = "preventDNSLeak"
         static let proxyMode = "proxyMode"
         static let quicPolicy = "quicPolicy"
         static let reflectionAddresses = "reflectionAddresses"
@@ -297,14 +296,6 @@ nonisolated final class AWCore {
         userDefaults.set(value, forKey: UserDefaultsKey.experimentalEnabled)
     }
 
-    static func getHiddenSettingsItems() -> [String] {
-        userDefaults.stringArray(forKey: UserDefaultsKey.hiddenSettingsItems) ?? []
-    }
-
-    static func setHiddenSettingsItems(_ value: [String]) {
-        userDefaults.set(value, forKey: UserDefaultsKey.hiddenSettingsItems)
-    }
-
     static func getHideVPNIcon() -> Bool {
         userDefaults.bool(forKey: UserDefaultsKey.hideVPNIcon)
     }
@@ -352,7 +343,15 @@ nonisolated final class AWCore {
     static func setBlockWebRTC(_ value: Bool) {
         userDefaults.set(value, forKey: UserDefaultsKey.blockWebRTC)
     }
-    
+
+    static func getPreventDNSLeak() -> Bool {
+        userDefaults.bool(forKey: UserDefaultsKey.preventDNSLeak)
+    }
+
+    static func setPreventDNSLeak(_ value: Bool) {
+        userDefaults.set(value, forKey: UserDefaultsKey.preventDNSLeak)
+    }
+
     static func getAdvertiseIPv6ToApps() -> Bool {
         userDefaults.bool(forKey: UserDefaultsKey.advertiseIPv6ToApps)
     }

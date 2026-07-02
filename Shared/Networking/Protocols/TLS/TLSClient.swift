@@ -140,7 +140,7 @@ nonisolated class TLSClient {
             }
             self.storedClientHello = clientHello.subdata(in: 5..<clientHello.count)
 
-            let transport = RawTCPSocket()
+            let transport = NWTCPTransport()
             self.connection = transport
 
             transport.connect(host: host, port: port, initialData: clientHello) { [weak self] error in
@@ -188,14 +188,11 @@ nonisolated class TLSClient {
     private func releasingConnectionOnFailure(
         _ completion: @escaping (Result<TLSRecordConnection, Error>) -> Void
     ) -> (Result<TLSRecordConnection, Error>) -> Void {
-        let span = PerformanceMonitor.span(.tlsHandshake)
         return { [weak self] result in
             if case .failure = result {
                 self?.connection?.forceCancel()
                 self?.connection = nil
                 self?.clearHandshakeState()
-            } else {
-                span.stop()
             }
             completion(result)
         }
@@ -625,6 +622,10 @@ nonisolated class TLSClient {
     // MARK: - Certificate Validation
 
     func validateCertificate(completion: @escaping (Result<Void, Error>) -> Void) {
+        if configuration.insecureSkipVerify {
+            completion(.success(()))
+            return
+        }
         switch CertificatePolicy.verify(chain: serverCertificates, serverName: configuration.serverName) {
         case .trusted:
             completion(.success(()))

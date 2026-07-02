@@ -119,12 +119,6 @@ extension ProxyConfiguration {
         let uploadMbps = HysteriaCongestionControl.clampUploadMbps(rawUp ?? HysteriaCongestionControl.uploadMbpsDefault)
         let downloadMbps = HysteriaCongestionControl.clampDownloadMbps(rawDown ?? HysteriaCongestionControl.downloadMbpsDefault)
 
-        // Both `mport` (Hysteria links) and `ports` (Clash) name the hop range, by source.
-        let portsSpec = (parameters["mport"]?.isEmpty == false) ? parameters["mport"]
-            : ((parameters["ports"]?.isEmpty == false) ? parameters["ports"] : nil)
-        let hopInterval = (parameters["hop-interval"] ?? parameters["hopInterval"]).flatMap { Int($0) }
-        let portHopping = HysteriaPortHopping.make(spec: portsSpec, intervalSeconds: hopInterval)
-
         let obfuscation: HysteriaObfuscation?
         if let obfsType = parameters["obfs"], !obfsType.isEmpty {
             let obfsMin = parameters["obfs-min-packet-size"].flatMap { Int($0) }
@@ -147,7 +141,6 @@ extension ProxyConfiguration {
                 congestionControl: congestionControl,
                 uploadMbps: uploadMbps,
                 downloadMbps: downloadMbps,
-                portHopping: portHopping,
                 obfuscation: obfuscation,
                 sni: sni
             )
@@ -564,17 +557,17 @@ extension ProxyConfiguration {
             if let configuration = WebSocketConfiguration.parse(from: params, serverAddress: serverAddress) {
                 return .ws(configuration)
             }
-            return .tcp
+            return .raw
         case "httpupgrade":
             if let configuration = HTTPUpgradeConfiguration.parse(from: params, serverAddress: serverAddress) {
                 return .httpUpgrade(configuration)
             }
-            return .tcp
+            return .raw
         case "grpc":
             if let configuration = GRPCConfiguration.parse(from: params) {
                 return .grpc(configuration)
             }
-            return .tcp
+            return .raw
         case "xhttp":
             let tlsServerName: String?
             if case .tls(let tls) = xraySecurityLayer { tlsServerName = tls.serverName }
@@ -585,9 +578,9 @@ extension ProxyConfiguration {
             if let configuration = XHTTPConfiguration.parse(from: params, serverAddress: serverAddress, tlsServerName: tlsServerName, realityServerName: realityServerName) {
                 return .xhttp(configuration)
             }
-            return .tcp
+            return .raw
         default:
-            return .tcp
+            return .raw
         }
     }
 

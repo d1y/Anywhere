@@ -111,6 +111,7 @@ class TunnelStack {
     var blockUDP: Bool = false
     var quicPolicy: QUICPolicy = .blocked
     var blockWebRTC: Bool = true
+    var preventDNSLeak: Bool = false
     var advertiseIPv6ToApps: Bool = false
 
     // Reflection settings; owned by ``lwipQueue``, published as the
@@ -139,13 +140,6 @@ class TunnelStack {
 
     /// Pending deferred restart when throttled. Cancelled and replaced on each new request.
     var deferredRestart: DispatchWorkItem?
-
-    /// Timestamp of the last network-path-change recovery (used for debouncing).
-    var lastNetworkRecoveryTime: CFAbsoluteTime = 0
-
-    /// Pending debounced network recovery. Cancelled and replaced on each new
-    /// path update inside the debounce window.
-    var pendingNetworkRecovery: DispatchWorkItem?
 
     /// Recurring stack-lifetime tasks. Centralizes their lifecycle and reconciles them
     /// on device wake.
@@ -418,6 +412,7 @@ class TunnelStack {
         loadBlockUDPSetting()
         loadQUICPolicySetting()
         loadBlockWebRTCSetting()
+        loadPreventDNSLeakSetting()
         loadReflectionSetting()
         loadMITMSetting()
 
@@ -491,6 +486,10 @@ class TunnelStack {
 
     private func loadBlockWebRTCSetting() {
         blockWebRTC = AWCore.getBlockWebRTC()
+    }
+
+    private func loadPreventDNSLeakSetting() {
+        preventDNSLeak = AWCore.getPreventDNSLeak()
     }
 
     private func loadReflectionSetting() {

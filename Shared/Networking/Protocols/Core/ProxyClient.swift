@@ -31,7 +31,7 @@ private final class TeardownCounter: @unchecked Sendable {
 nonisolated class ProxyClient {
     let configuration: ProxyConfiguration
     let useResolvedAddressForDirectDial: Bool
-    var connection: RawTCPSocket?
+    var connection: NWTCPTransport?
     private var realityClient: RealityClient?
     private var realityConnection: TLSRecordConnection?
     var tlsClient: TLSClient?
@@ -91,16 +91,10 @@ nonisolated class ProxyClient {
     private func handshakeTimed(
         _ completion: @escaping (Result<ProxyConnection, Error>) -> Void
     ) -> (Result<ProxyConnection, Error>) -> Void {
-        // Perf span covers every dial (not only the default proxy), stopped on success.
-        let span = PerformanceMonitor.span(.proxyHandshake)
-        let timed: (Result<ProxyConnection, Error>) -> Void = { result in
-            if case .success = result { span.stop() }
-            completion(result)
-        }
-        guard isDefaultProxy else { return timed }
-        if poolsQUICSession { return timed }
+        guard isDefaultProxy else { return completion }
+        if poolsQUICSession { return completion }
         let metric: ConnectionMetrics.Metric = isQUICTransport ? .handshakeNoDial : .handshake
-        return MetricTimer.timing(metric, timed)
+        return MetricTimer.timing(metric, completion)
     }
     
     func connect(
@@ -554,7 +548,7 @@ nonisolated class ProxyClient {
             connectWithGRPC(command: command, destinationHost: destinationHost, destinationPort: destinationPort, initialData: initialData, completion: completion)
         case .xhttp:
             connectWithXHTTP(command: command, destinationHost: destinationHost, destinationPort: destinationPort, initialData: initialData, completion: completion)
-        case .tcp:
+        case .raw:
             switch configuration.xraySecurityLayer {
             case .tls(let tlsConfig):
                 connectWithTLS(tlsConfig: tlsConfig, command: command, destinationHost: destinationHost, destinationPort: destinationPort, initialData: initialData, completion: completion)
@@ -583,7 +577,7 @@ nonisolated class ProxyClient {
                 supportsVision: transportSupportsVision, completion: completion
             )
         } else {
-            let transport = RawTCPSocket()
+            let transport = NWTCPTransport()
             self.connection = transport
 
             transport.connect(host: directDialHost, port: configuration.serverPort) { [weak self] error in
@@ -739,7 +733,7 @@ nonisolated class ProxyClient {
                     destinationPort: destinationPort, initialData: initialData, completion: completion
                 )
             } else {
-                let transport = RawTCPSocket()
+                let transport = NWTCPTransport()
                 self.connection = transport
 
                 transport.connect(host: directDialHost, port: configuration.serverPort) { [weak self] error in
@@ -838,7 +832,7 @@ nonisolated class ProxyClient {
                     destinationPort: destinationPort, initialData: initialData, completion: completion
                 )
             } else {
-                let transport = RawTCPSocket()
+                let transport = NWTCPTransport()
                 self.connection = transport
 
                 transport.connect(host: directDialHost, port: configuration.serverPort) { [weak self] error in
@@ -1003,7 +997,7 @@ nonisolated class ProxyClient {
                 destinationPort: destinationPort, initialData: initialData, completion: completion
             )
         } else {
-            let transport = RawTCPSocket()
+            let transport = NWTCPTransport()
             self.connection = transport
             transport.connect(host: directDialHost, port: configuration.serverPort) { [weak self] error in
                 if let error {
@@ -1510,10 +1504,10 @@ nonisolated class ProxyClient {
         }
         switch security {
         case .none:
-            let socket = RawTCPSocket()
-            socket.connect(host: host, port: port) { error in
+            let transport = NWTCPTransport()
+            transport.connect(host: host, port: port) { error in
                 if let error { completion(.failure(error)); return }
-                bringUp(TransportClosures(rawTCP: socket), retaining: socket)
+                bringUp(TransportClosures(tcp: transport), retaining: transport)
             }
         case .tls(let tlsConfig):
             // XHTTP rides h2; advertise it (fall back to http/1.1) regardless of the configured ALPN.
@@ -1590,11 +1584,11 @@ nonisolated class ProxyClient {
             if let tunnel = overTunnel {
                 completion(.success(.byteStream(TransportClosures(tunnel: tunnel))))
             } else {
-                let socket = RawTCPSocket()
-                retainedXHTTPObjects.append(socket)
-                socket.connect(host: host, port: port) { error in
+                let transport = NWTCPTransport()
+                retainedXHTTPObjects.append(transport)
+                transport.connect(host: host, port: port) { error in
                     if let error { completion(.failure(error)); return }
-                    completion(.success(.byteStream(TransportClosures(rawTCP: socket))))
+                    completion(.success(.byteStream(TransportClosures(tcp: transport))))
                 }
             }
         case .tls(let tlsConfig):
@@ -1737,10 +1731,10 @@ nonisolated class ProxyClient {
         }
         switch security {
         case .none:
-            let socket = RawTCPSocket()
-            socket.connect(host: host, port: port) { error in
+            let transport = NWTCPTransport()
+            transport.connect(host: host, port: port) { error in
                 if error != nil { completion(nil); return }
-                wrap(TransportClosures(rawTCP: socket), retaining: socket)
+                wrap(TransportClosures(tcp: transport), retaining: transport)
             }
         case .tls(let tlsConfig):
             let h1TLS = TLSConfiguration(
