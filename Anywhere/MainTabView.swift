@@ -79,56 +79,44 @@ struct MainTabView: View {
     private var tabView: some View {
         if #available(iOS 26.0, *) {
             TabView(selection: $selectedTab) {
-                Tab(value: .home) {
+                Tab("Home", image: "anywhere", value: .home) {
                     NavigationStack {
                         HomeView()
                     }
                     .colorScheme(settings.homeColorScheme == .light ? .light : .dark)
-                } label: {
-                    Image("anywhere")
                 }
-                
-                Tab(value: .proxies) {
+
+                Tab("Proxies", systemImage: "network", value: .proxies) {
                     NavigationStack {
                         ProxiesPageView()
                     }
-                } label: {
-                    Image(systemName: "network")
                 }
-                
-                Tab(value: .settings) {
+
+                Tab("Settings", systemImage: "gearshape", value: .settings) {
                     NavigationStack {
                         SettingsView()
                     }
-                } label: {
-                    Image(systemName: "gearshape")
                 }
             }
         } else if #available(iOS 18.0, *) {
             TabView(selection: $selectedTab) {
-                Tab(value: .home) {
+                Tab("Home", image: "anywhere", value: .home) {
                     NavigationStack {
                         HomeView()
                     }
                     .colorScheme(settings.homeColorScheme == .light ? .light : .dark)
-                } label: {
-                    Label("Home", image: "anywhere")
                 }
-                
-                Tab(value: .proxies) {
+
+                Tab("Proxies", systemImage: "network", value: .proxies) {
                     NavigationStack {
                         ProxiesPageView()
                     }
-                } label: {
-                    Label("Proxies", systemImage: "network")
                 }
-                
-                Tab(value: .settings) {
+
+                Tab("Settings", systemImage: "gearshape", value: .settings) {
                     NavigationStack {
                         SettingsView()
                     }
-                } label: {
-                    Label("Settings", systemImage: "gearshape")
                 }
             }
         } else {
