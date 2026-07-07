@@ -21,6 +21,11 @@ extension Color {
         )
     }
 
+    static let connectedBackgroundStart = Color(hex: 0xFBEFD2)
+    static let connectedBackgroundEnd = Color(hex: 0xE7C98D)
+    static let disconnectedBackgroundStart = Color(hex: 0x05081A)
+    static let disconnectedBackgroundEnd = Color(hex: 0x0A0E27)
+
     #if canImport(UIKit)
     var archivedData: Data? {
         try? NSKeyedArchiver.archivedData(withRootObject: UIColor(self), requiringSecureCoding: true)
@@ -34,3 +39,12 @@ extension Color {
     }
     #endif
 }
+
+#if canImport(UIKit)
+extension UIColor {
+    static let connectedBackgroundStart = UIColor(Color.connectedBackgroundStart)
+    static let connectedBackgroundEnd = UIColor(Color.connectedBackgroundEnd)
+    static let disconnectedBackgroundStart = UIColor(Color.disconnectedBackgroundStart)
+    static let disconnectedBackgroundEnd = UIColor(Color.disconnectedBackgroundEnd)
+}
+#endif

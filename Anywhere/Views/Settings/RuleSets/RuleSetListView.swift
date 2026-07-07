@@ -35,6 +35,41 @@ struct RuleSetListView: View {
     @State private var showResetConfirmAlert = false
 
     var body: some View {
+        ruleSetsList
+            .listRowSpacing(8)
+            .navigationTitle("Routing Rules")
+            .toolbar { ruleSetToolbar }
+            .onChange(of: builtInServiceRuleSets) { oldValue, newValue in
+                syncBuiltInAssignments(oldValue, newValue)
+            }
+            .onChange(of: isEditing) { _, newValue in
+                if newValue == false {
+                    save()
+                }
+            }
+            .onAppear(perform: reloadRuleSets)
+            .fileImporter(
+                isPresented: $showFileImporter,
+                allowedContentTypes: Self.importAllowedContentTypes
+            ) { result in
+                handleFileImport(result)
+            }
+            .modifier(RuleSetListAlerts(
+                showAddSheet: $showAddSheet,
+                newRuleSetName: $newRuleSetName,
+                importError: $importError,
+                showSubscribeAlert: $showSubscribeAlert,
+                subscribeURL: $subscribeURL,
+                subscribeError: $subscribeError,
+                showResetConfirmAlert: $showResetConfirmAlert,
+                onAdd: addRuleSet,
+                onSubscribe: subscribe,
+                onReset: resetAssignments
+            ))
+    }
+
+    @ViewBuilder
+    private var ruleSetsList: some View {
         List {
             Section {
                 ForEach($builtInServiceRuleSets) { $ruleSet in
@@ -52,127 +87,90 @@ struct RuleSetListView: View {
                             ruleSetRow(for: customRuleSet)
                         }
                     }
-                    .onDelete { offsets in
-                        customRuleSets.remove(atOffsets: offsets)
-                        if isEditing != true {
-                            save()
-                        }
-                    }
-                    .onMove { source, destination in
-                        customRuleSets.move(fromOffsets: source, toOffset: destination)
-                        if isEditing != true {
-                            save()
-                        }
-                    }
+                    .onDelete(perform: deleteCustomRuleSets)
+                    .onMove(perform: moveCustomRuleSets)
                 }
             }
         }
-        .listRowSpacing(8)
-        .navigationTitle("Routing Rules")
-        .toolbar {
-            if isEditing == true || !customRuleSets.isEmpty {
-                ToolbarItem {
-                    EditButton()
-                }
-            }
+    }
+
+    @ToolbarContentBuilder
+    private var ruleSetToolbar: some ToolbarContent {
+        if isEditing == true || !customRuleSets.isEmpty {
             ToolbarItem {
-                Menu("More", systemImage: "ellipsis") {
-                    Button {
-                        showAddSheet = true
-                    } label: {
-                        Label("Add Rule Set", systemImage: "plus")
-                    }
-                    Button {
-                        importError = nil
-                        showFileImporter = true
-                    } label: {
-                        Label("Import Rule Set", systemImage: "square.and.arrow.down")
-                    }
-                    Button {
-                        subscribeURL = ""
-                        showSubscribeAlert = true
-                    } label: {
-                        Label("Subscribe Rule Set", systemImage: "link")
-                    }
-                    Button(role: .destructive) {
-                        showResetConfirmAlert = true
-                    } label: {
-                        Label("Reset", systemImage: "arrow.clockwise")
-                    }
+                EditButton()
+            }
+        }
+        ToolbarItem {
+            Menu("More", systemImage: "ellipsis") {
+                Button {
+                    showAddSheet = true
+                } label: {
+                    Label("Add Rule Set", systemImage: "plus")
+                }
+                Button {
+                    importError = nil
+                    showFileImporter = true
+                } label: {
+                    Label("Import Rule Set", systemImage: "square.and.arrow.down")
+                }
+                Button {
+                    subscribeURL = ""
+                    showSubscribeAlert = true
+                } label: {
+                    Label("Subscribe Rule Set", systemImage: "link")
+                }
+                Button(role: .destructive) {
+                    showResetConfirmAlert = true
+                } label: {
+                    Label("Reset", systemImage: "arrow.clockwise")
                 }
             }
         }
-        .onChange(of: builtInServiceRuleSets) { oldValue, newValue in
-            for currentRuleSet in newValue {
-                let previousRuleSet = oldValue.first(where: { $0.id == currentRuleSet.id })
-                if currentRuleSet.assignedConfigurationId != previousRuleSet?.assignedConfigurationId {
-                    RoutingRuleSetStore.shared.updateAssignment(currentRuleSet, configurationId: currentRuleSet.assignedConfigurationId)
-                }
+    }
+
+    private func reloadRuleSets() {
+        builtInServiceRuleSets = RoutingRuleSetStore.shared.builtInServiceRuleSets
+        customRuleSets = RoutingRuleSetStore.shared.customRuleSets
+    }
+
+    private func syncBuiltInAssignments(_ oldValue: [RoutingRuleSet], _ newValue: [RoutingRuleSet]) {
+        for currentRuleSet in newValue {
+            let previousRuleSet = oldValue.first(where: { $0.id == currentRuleSet.id })
+            if currentRuleSet.assignedConfigurationId != previousRuleSet?.assignedConfigurationId {
+                RoutingRuleSetStore.shared.updateAssignment(
+                    currentRuleSet,
+                    configurationId: currentRuleSet.assignedConfigurationId
+                )
             }
         }
-        .onChange(of: isEditing) { _, newValue in
-            if newValue == false {
-                save()
-            }
+    }
+
+    private func deleteCustomRuleSets(at offsets: IndexSet) {
+        customRuleSets.remove(atOffsets: offsets)
+        if isEditing != true {
+            save()
         }
-        .onAppear {
-            builtInServiceRuleSets = RoutingRuleSetStore.shared.builtInServiceRuleSets
-            customRuleSets = RoutingRuleSetStore.shared.customRuleSets
+    }
+
+    private func moveCustomRuleSets(from source: IndexSet, to destination: Int) {
+        customRuleSets.move(fromOffsets: source, toOffset: destination)
+        if isEditing != true {
+            save()
         }
-        .fileImporter(
-            isPresented: $showFileImporter,
-            allowedContentTypes: Self.importAllowedContentTypes
-        ) { result in
-            handleFileImport(result)
-        }
-        .alert("Add Rule Set", isPresented: $showAddSheet) {
-            TextField("Name", text: $newRuleSetName)
-            Button("Add") {
-                let name = newRuleSetName.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !name.isEmpty else { return }
-                _ = RoutingRuleSetStore.shared.addCustomRuleSet(name: name)
-                customRuleSets = RoutingRuleSetStore.shared.customRuleSets
-                newRuleSetName = ""
-            }
-            Button("Cancel", role: .cancel) {
-                newRuleSetName = ""
-            }
-        }
-        .alert("Import Failed", isPresented: Binding(
-            get: { importError != nil },
-            set: { if !$0 { importError = nil } }
-        )) {
-            Button("OK") { importError = nil }
-        } message: {
-            Text(importError ?? "")
-        }
-        .alert("Subscribe Rule Set", isPresented: $showSubscribeAlert) {
-            TextField("Anywhere Routing Rule Set URL", text: $subscribeURL)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-                .keyboardType(.URL)
-            Button("Subscribe") {
-                subscribe(to: subscribeURL)
-            }
-            Button("Cancel", role: .cancel) {}
-        }
-        .alert("Subscription Failed", isPresented: Binding(
-            get: { subscribeError != nil },
-            set: { if !$0 { subscribeError = nil } }
-        )) {
-            Button("OK") { subscribeError = nil }
-        } message: {
-            Text(subscribeError ?? "")
-        }
-        .alert("Reset Assignments", isPresented: $showResetConfirmAlert) {
-            Button("Reset", role: .destructive) {
-                RoutingRuleSetStore.shared.resetAssignments()
-                builtInServiceRuleSets = RoutingRuleSetStore.shared.builtInServiceRuleSets
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Reset all rule set assignments to Default.")
-        }
+    }
+
+    private func addRuleSet() {
+        let name = newRuleSetName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        _ = RoutingRuleSetStore.shared.addCustomRuleSet(name: name)
+        customRuleSets = RoutingRuleSetStore.shared.customRuleSets
+        newRuleSetName = ""
+    }
+
+    private func resetAssignments() {
+        RoutingRuleSetStore.shared.resetAssignments()
+        builtInServiceRuleSets = RoutingRuleSetStore.shared.builtInServiceRuleSets
     }
     
     private func save() {
@@ -326,5 +324,62 @@ struct RuleSetListView: View {
             }
         }
         .foregroundStyle(.secondary)
+    }
+}
+
+private struct RuleSetListAlerts: ViewModifier {
+    @Binding var showAddSheet: Bool
+    @Binding var newRuleSetName: String
+    @Binding var importError: String?
+    @Binding var showSubscribeAlert: Bool
+    @Binding var subscribeURL: String
+    @Binding var subscribeError: String?
+    @Binding var showResetConfirmAlert: Bool
+
+    let onAdd: () -> Void
+    let onSubscribe: (String) -> Void
+    let onReset: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .alert("Add Rule Set", isPresented: $showAddSheet) {
+                TextField("Name", text: $newRuleSetName)
+                Button("Add", action: onAdd)
+                Button("Cancel", role: .cancel) {
+                    newRuleSetName = ""
+                }
+            }
+            .alert("Import Failed", isPresented: Binding(
+                get: { importError != nil },
+                set: { if !$0 { importError = nil } }
+            )) {
+                Button("OK") { importError = nil }
+            } message: {
+                Text(importError ?? "")
+            }
+            .alert("Subscribe Rule Set", isPresented: $showSubscribeAlert) {
+                TextField("Anywhere Routing Rule Set URL", text: $subscribeURL)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.URL)
+                Button("Subscribe") {
+                    onSubscribe(subscribeURL)
+                }
+                Button("Cancel", role: .cancel) {}
+            }
+            .alert("Subscription Failed", isPresented: Binding(
+                get: { subscribeError != nil },
+                set: { if !$0 { subscribeError = nil } }
+            )) {
+                Button("OK") { subscribeError = nil }
+            } message: {
+                Text(subscribeError ?? "")
+            }
+            .alert("Reset Assignments", isPresented: $showResetConfirmAlert) {
+                Button("Reset", role: .destructive, action: onReset)
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Reset all rule set assignments to Default.")
+            }
     }
 }

@@ -26,55 +26,68 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private var outboundSuspended = false
 
     // MARK: - Tunnel Lifecycle
-    
-    override func startTunnel(options: [String : NSObject]? = nil) async throws {
-        // App starts pass the configuration in `options`; Settings/On-Demand starts
-        // pass nil, so fall back to the last persisted configuration.
-        let configuration: ProxyConfiguration?
+
+    private static func loadStartupConfiguration(from options: [String: NSObject]?) -> ProxyConfiguration? {
         if let messageData = options?[TunnelMessage.optionKey] as? Data,
-           case .setConfiguration(let config) = try? JSONDecoder().decode(TunnelMessage.self, from: messageData) {
-            configuration = config
-        } else if let savedData = AWCore.getLastConfigurationData() {
-            configuration = try? JSONDecoder().decode(ProxyConfiguration.self, from: savedData)
-        } else {
-            configuration = nil
+           let message = try? JSONDecoder().decode(TunnelMessage.self, from: messageData) {
+            if case .setConfiguration(let config) = message {
+                return config
+            }
         }
-        
-        guard let configuration else {
+
+        if let savedData = AWCore.getLastConfigurationData() {
+            return try? JSONDecoder().decode(ProxyConfiguration.self, from: savedData)
+        }
+
+        return nil
+    }
+    
+    override func startTunnel(options: [String : NSObject]?, completionHandler: @escaping (Error?) -> Void) {
+        guard let configuration = Self.loadStartupConfiguration(from: options) else {
             logger.error("[VPN] Invalid or missing configuration")
-            throw NSError(domain: AWCore.Identifier.errorDomain, code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid configuration"])
+            completionHandler(NSError(
+                domain: AWCore.Identifier.errorDomain,
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Invalid configuration"]
+            ))
+            return
         }
-        
+
         tunnelStack.onTunnelSettingsNeedReapply = { [weak self] in
             self?.reapplyTunnelSettings()
         }
-        
+
         let settings = buildTunnelSettings()
-        
-        Task {
-            do {
-                try await setTunnelNetworkSettings(settings)
-                
-#if os(iOS)
-                if #available(iOS 18.0, *) {
-                    ControlCenter.shared.reloadControls(ofKind: "com.argsment.Anywhere.Widget.VPNToggle")
-                }
-#endif
-                
-                self.tunnelStack.start(packetFlow: self.packetFlow,
-                                       configuration: configuration)
-                self.startMonitoringPath()
-                self.statsRecorder.start {
-                    return StatsRecorder.RawValues(
-                        byteCounts: self.tunnelStack.byteCounts,
-                        tcpConnectionCount: self.tunnelStack.activeTCPConnections,
-                        udpConnectionCount: self.tunnelStack.activeUDPConnections,
-                        memoryBytes: Self.memoryFootprint()
-                    )
-                }
-            } catch {
-                logger.error("[VPN] Failed to set tunnel settings: \(error.localizedDescription)")
+        setTunnelNetworkSettings(settings) { [weak self] error in
+            guard let self else {
+                completionHandler(error)
+                return
             }
+
+            if let error {
+                logger.error("[VPN] Failed to set tunnel settings: \(error.localizedDescription)")
+                completionHandler(error)
+                return
+            }
+
+#if os(iOS)
+            if #available(iOS 18.0, *) {
+                ControlCenter.shared.reloadControls(ofKind: "com.argsment.Anywhere.Widget.VPNToggle")
+            }
+#endif
+
+            self.tunnelStack.start(packetFlow: self.packetFlow, configuration: configuration)
+            self.startMonitoringPath()
+            self.statsRecorder.start {
+                StatsRecorder.RawValues(
+                    byteCounts: self.tunnelStack.byteCounts,
+                    tcpConnectionCount: self.tunnelStack.activeTCPConnections,
+                    udpConnectionCount: self.tunnelStack.activeUDPConnections,
+                    memoryBytes: Self.memoryFootprint()
+                )
+            }
+
+            completionHandler(nil)
         }
     }
 

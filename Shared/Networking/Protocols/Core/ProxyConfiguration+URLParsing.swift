@@ -141,6 +141,10 @@ extension ProxyConfiguration {
                 congestionControl: congestionControl,
                 uploadMbps: uploadMbps,
                 downloadMbps: downloadMbps,
+                portHopping: HysteriaPortHopping.make(
+                    spec: parameters["ports"] ?? "",
+                    intervalSeconds: parameters["hop-interval"].flatMap(Int.init)
+                ),
                 obfuscation: obfuscation,
                 sni: sni
             )

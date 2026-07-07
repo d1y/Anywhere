@@ -16,7 +16,9 @@ build/
 *.swp
 *.dSYM/
 *.ipa
+*.dmg
 *.app.dSYM.zip
+output/
 
 # macOS
 .DS_Store

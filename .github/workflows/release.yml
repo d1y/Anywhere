@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-release:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build unsigned iOS IPA
+        run: |
+          chmod +x build_nosign.sh
+          ./build_nosign.sh --ipa
+
+      - name: Resolve release version
+        id: version
+        run: |
+          eval "$(./build_nosign.sh --print-version)"
+          short_sha="$(git rev-parse --short HEAD)"
+          tag="v${MARKETING_VERSION}.${BUILD_NUMBER}"
+
+          if git rev-parse "$tag" >/dev/null 2>&1 || git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            tag="v${MARKETING_VERSION}.${BUILD_NUMBER}-${short_sha}"
+          fi
+
+          echo "marketing_version=$MARKETING_VERSION" >> "$GITHUB_OUTPUT"
+          echo "build_number=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Collect release assets
+        id: assets
+        run: |
+          shopt -s nullglob
+          assets=(output/*.ipa)
+          if [[ ${#assets[@]} -eq 0 ]]; then
+            echo "No release artifacts found in output/" >&2
+            exit 1
+          fi
+
+          {
+            echo "files<<EOF"
+            printf '%s\n' "${assets[@]}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Anywhere ${{ steps.version.outputs.marketing_version }} (${{ steps.version.outputs.build_number }})
+          body: |
+            Unsigned build from commit ${{ steps.version.outputs.short_sha }}.
+
+            **Version:** ${{ steps.version.outputs.marketing_version }}
+            **Build:** ${{ steps.version.outputs.build_number }}
+
+            ### Artifacts
+            - iOS `.ipa` (unsigned)
+
+            These builds are not signed for App Store distribution. Install with your own signing workflow if needed.
+          files: ${{ steps.assets.outputs.files }}
+          generate_release_notes: true

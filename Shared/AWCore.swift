@@ -86,6 +86,7 @@ nonisolated final class AWCore {
         static let bypassCountryCode = "bypassCountryCode"
         static let experimentalEnabled = "experimentalEnabled"
         static let hideVPNIcon = "hideVPNIcon"
+        static let hiddenSettingsItems = "hiddenSettingsItems"
         static let homeColorScheme = "homeColorScheme"
         static let iCloudSyncEnabled = "iCloudSyncEnabled"
         static let identifier = "identifier"
@@ -294,6 +295,14 @@ nonisolated final class AWCore {
 
     static func setExperimentalEnabled(_ value: Bool) {
         userDefaults.set(value, forKey: UserDefaultsKey.experimentalEnabled)
+    }
+
+    static func getHiddenSettingsItems() -> [String] {
+        userDefaults.stringArray(forKey: UserDefaultsKey.hiddenSettingsItems) ?? []
+    }
+
+    static func setHiddenSettingsItems(_ items: [String]) {
+        userDefaults.set(items, forKey: UserDefaultsKey.hiddenSettingsItems)
     }
 
     static func getHideVPNIcon() -> Bool {

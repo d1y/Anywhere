@@ -260,6 +260,7 @@ struct ClashProxyParser {
                 congestionControl: congestionControl,
                 uploadMbps: uploadMbps,
                 downloadMbps: downloadMbps,
+                portHopping: nil,
                 obfuscation: obfuscation,
                 sni: sni
             )

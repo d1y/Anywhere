@@ -96,7 +96,7 @@ extension ProxyConfiguration {
     }
     
     private func toHysteriaURL() -> String {
-        guard case .hysteria(let password, let congestionControl, let uploadMbps, let downloadMbps, let obfuscation, let sni) = outbound else {
+        guard case .hysteria(let password, let congestionControl, let uploadMbps, let downloadMbps, let portHopping, let obfuscation, let sni) = outbound else {
             return ""
         }
         let encodedPassword = password.addingPercentEncoding(withAllowedCharacters: .urlPasswordAllowed) ?? ""
@@ -116,6 +116,10 @@ extension ProxyConfiguration {
         }
         if sni != serverAddress {
             parameters.append("sni=\(sni)")
+        }
+        if let portHopping {
+            parameters.append("ports=\(encodedQueryValue(portHopping.portsSpec))")
+            parameters.append("hop-interval=\(portHopping.intervalSeconds)")
         }
         let query = parameters.isEmpty ? "" : "?\(parameters.joined(separator: "&"))"
         return "hysteria2://\(encodedPassword)@\(bracketedServerAddress):\(serverPort)/\(query)#\(fragment)"

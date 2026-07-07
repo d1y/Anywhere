@@ -105,6 +105,7 @@ enum Outbound: Hashable {
         congestionControl: HysteriaCongestionControl,
         uploadMbps: Int,
         downloadMbps: Int,
+        portHopping: HysteriaPortHopping?,
         obfuscation: HysteriaObfuscation?,
         sni: String
     )
@@ -399,6 +400,7 @@ struct ProxyConfiguration: Identifiable, Hashable, Codable {
         case transport, websocket, httpUpgrade, grpc, xhttp
         case security, tls, reality
         case hysteriaPassword, hysteriaCongestionControl, hysteriaUploadMbps, hysteriaDownloadMbps
+        case hysteriaPortHoppingSpec, hysteriaPortHoppingInterval
         case hysteriaObfs, hysteriaObfsPassword, hysteriaObfsMinPacketSize, hysteriaObfsMaxPacketSize
         case hysteriaSNI
         case nowhereKey, nowhereSpec, nowhereSNI, nowhereALPN, nowhereTLS, net, pool
@@ -474,11 +476,16 @@ struct ProxyConfiguration: Identifiable, Hashable, Codable {
             let obfsMin = try container.decodeIfPresent(Int.self, forKey: .hysteriaObfsMinPacketSize)
             let obfsMax = try container.decodeIfPresent(Int.self, forKey: .hysteriaObfsMaxPacketSize)
             let explicitSNI = try container.decodeIfPresent(String.self, forKey: .hysteriaSNI)
+            let portHopping = HysteriaPortHopping.make(
+                spec: try container.decodeIfPresent(String.self, forKey: .hysteriaPortHoppingSpec) ?? "",
+                intervalSeconds: try container.decodeIfPresent(Int.self, forKey: .hysteriaPortHoppingInterval)
+            )
             outbound = .hysteria(
                 password: try container.decodeIfPresent(String.self, forKey: .hysteriaPassword) ?? "",
                 congestionControl: congestionControl,
                 uploadMbps: HysteriaCongestionControl.clampUploadMbps(rawUp),
                 downloadMbps: HysteriaCongestionControl.clampDownloadMbps(rawDown),
+                portHopping: portHopping,
                 obfuscation: HysteriaObfuscation.make(
                     type: obfsType,
                     password: obfsPassword,
@@ -632,13 +639,17 @@ struct ProxyConfiguration: Identifiable, Hashable, Codable {
             case .reality(let config): try container.encode(config, forKey: .reality)
             }
 
-        case .hysteria(let password, let congestionControl, let uploadMbps, let downloadMbps, let obfuscation, let sni):
+        case .hysteria(let password, let congestionControl, let uploadMbps, let downloadMbps, let portHopping, let obfuscation, let sni):
             try container.encode(id, forKey: .uuid)
             try container.encode("none", forKey: .encryption)
             try container.encode(password, forKey: .hysteriaPassword)
             try container.encode(congestionControl, forKey: .hysteriaCongestionControl)
             try container.encode(uploadMbps, forKey: .hysteriaUploadMbps)
             try container.encode(downloadMbps, forKey: .hysteriaDownloadMbps)
+            if let portHopping {
+                try container.encode(portHopping.portsSpec, forKey: .hysteriaPortHoppingSpec)
+                try container.encode(portHopping.intervalSeconds, forKey: .hysteriaPortHoppingInterval)
+            }
             if let obfuscation {
                 try container.encode(obfuscation.typeTag, forKey: .hysteriaObfs)
                 try container.encode(obfuscation.password, forKey: .hysteriaObfsPassword)
