@@ -42,7 +42,9 @@ nonisolated final class JSONBlobStore: @unchecked Sendable {
     nonisolated(unsafe) static var mergeResolver: ((Key, [(data: Data, updatedAt: Date)]) -> Data)?
 
     private init() {
-        let wantsCloudKit = AWCore.isHostApp && AWCore.getICloudSyncEnabled()
+        let wantsCloudKit = AWCore.hasAppGroupAccess
+            && AWCore.isHostApp
+            && AWCore.getICloudSyncEnabled()
         if wantsCloudKit, let cloudContainer = Self.makeContainer(cloudKit: true) {
             container = cloudContainer
             usesCloudKit = true
@@ -55,10 +57,16 @@ nonisolated final class JSONBlobStore: @unchecked Sendable {
     private static func makeContainer(cloudKit: Bool) -> ModelContainer? {
         let database: ModelConfiguration.CloudKitDatabase =
             cloudKit ? .private(AWCore.Identifier.iCloudContainer) : .none
-        let config = ModelConfiguration(
-            groupContainer: .identifier(AWCore.Identifier.appGroupSuite),
-            cloudKitDatabase: database
-        )
+        let config: ModelConfiguration
+        if AWCore.hasAppGroupAccess {
+            config = ModelConfiguration(
+                groupContainer: .identifier(AWCore.Identifier.appGroupSuite),
+                cloudKitDatabase: database
+            )
+        } else {
+            logger.warning("App Group container unavailable; using app-local SwiftData store")
+            config = ModelConfiguration(cloudKitDatabase: .none)
+        }
         do {
             return try ModelContainer(for: JSONBlob.self, configurations: config)
         } catch {

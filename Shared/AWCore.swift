@@ -55,9 +55,22 @@ nonisolated final class AWCore {
     static var isHostApp: Bool {
         Bundle.main.bundleIdentifier == Identifier.bundle
     }
-    
+
+    /// App Group container when entitlements/provisioning expose `group.com.argsment.Anywhere`.
+    static var appGroupContainerURL: URL? {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: Identifier.appGroupSuite)
+    }
+
+    static var hasAppGroupAccess: Bool {
+        appGroupContainerURL != nil
+    }
+
     private static let userDefaults: UserDefaults = {
-        let defaults = UserDefaults(suiteName: Identifier.appGroupSuite)!
+        let defaults = UserDefaults(suiteName: Identifier.appGroupSuite)
+            ?? UserDefaults.standard
+        if defaults === UserDefaults.standard {
+            logger.warning("App Group UserDefaults unavailable; using standard UserDefaults")
+        }
         defaults.register(defaults: registeredDefaults)
         return defaults
     }()
@@ -411,9 +424,17 @@ nonisolated final class AWCore {
     
     // MARK: - Routing Data
 
-    private static let routingDataURL = FileManager.default
-        .containerURL(forSecurityApplicationGroupIdentifier: Identifier.appGroupSuite)!
-        .appendingPathComponent("routing.bin")
+    private static func sharedDataURL(_ fileName: String) -> URL {
+        if let container = appGroupContainerURL {
+            return container.appendingPathComponent(fileName)
+        }
+        return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(fileName)
+    }
+
+    private static var routingDataURL: URL {
+        sharedDataURL("routing.bin")
+    }
     
     static func getRoutingData() -> Data? {
         try? Data(contentsOf: routingDataURL, options: .mappedIfSafe)
@@ -431,9 +452,9 @@ nonisolated final class AWCore {
 
     // MARK: - MITM Data
 
-    private static let mitmDataURL = FileManager.default
-        .containerURL(forSecurityApplicationGroupIdentifier: Identifier.appGroupSuite)!
-        .appendingPathComponent("mitm.bin")
+    private static var mitmDataURL: URL {
+        sharedDataURL("mitm.bin")
+    }
 
     static func getMITMData() -> Data? {
         try? Data(contentsOf: mitmDataURL, options: .mappedIfSafe)
